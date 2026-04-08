@@ -22,7 +22,7 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
     
     try:
         if model is None:
-            raise Exception("EfficientNet-B4 model failed to initialize.")
+            raise Exception("EfficientNet-B0 model failed to initialize.")
             
         if is_video:
             cap = cv2.VideoCapture(file_path)
@@ -72,10 +72,11 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
                 "status": "completed",
                 "result": {
                     "is_fake": final_is_fake,
+                    "is_deepfake": final_is_fake,
                     "confidence": round(final_confidence * 100, 2),
                     "heatmap_url": best_heatmap,
                     "metadata": {
-                        "model": "EfficientNet-B4 (PyTorch)",
+                        "model": "EfficientNet-B0 (PyTorch)",
                         "model_status": "loaded",
                         "analysis": {
                             "is_suspicious": False,
@@ -101,10 +102,11 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
                 "status": "completed",
                 "result": {
                     "is_fake": res["is_fake"],
+                    "is_deepfake": res.get("is_deepfake", res["is_fake"]),
                     "confidence": round(res["confidence"] * 100, 2),
                     "heatmap_url": res["heatmap"],
                     "metadata": {
-                        "model": "EfficientNet-B4 (PyTorch)",
+                        "model": "EfficientNet-B0 (PyTorch)",
                         "model_status": "loaded",
                         "analysis": image_metadata
                     }

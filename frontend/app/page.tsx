@@ -191,7 +191,7 @@ export default function DeepShieldDashboard() {
         </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground font-mono">
           <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-black/40 border border-primary/20 rounded-full text-xs">
-            <span className="text-primary font-bold">Architecture:</span> EfficientNet-B4 | <span className="text-primary font-bold">Engine:</span> PyTorch | <span className="text-primary font-bold">XAI:</span> Grad-CAM
+            <span className="text-primary font-bold">Architecture:</span> EfficientNet-B0 | <span className="text-primary font-bold">Engine:</span> PyTorch | <span className="text-primary font-bold">XAI:</span> Disabled
           </div>
           <span className="flex items-center gap-2"><Activity className="w-4 h-4 text-primary animate-pulse" /> SYSTEM: ONLINE</span>
           
