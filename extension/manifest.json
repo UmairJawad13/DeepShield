@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "DeepShield Scanner",
+  "version": "1.0",
+  "description": "Snap and analyze images on any webpage to detect deepfakes.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

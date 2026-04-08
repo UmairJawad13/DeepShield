@@ -1,0 +1,111 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+
+  /* Cyber Forensic Theme Additions */
+  --animate-laser: laser 2s ease-in-out infinite;
+
+  @keyframes laser {
+    0% { top: -5%; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: 105%; opacity: 0; }
+  }
+}
+
+:root {
+  --radius: 0.75rem;
+  /* Next.js default light mode - unused since we force dark */
+  --background: #ffffff;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-foreground: #09090b;
+  --primary: #00e5ff; /* Cyan */
+  --primary-foreground: #000000;
+  --secondary: #18181b;
+  --secondary-foreground: #00e5ff;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #00e5ff;
+  --destructive: #ef4444;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #00e5ff;
+}
+
+.dark {
+  /* Cyber-Forensic Dark Mode */
+  --background: #09090b; /* True deep dark */
+  --foreground: #f4f4f5; /* Offwhite text */
+  --card: #121214;       /* Slightly lighter glass card */
+  --card-foreground: #f4f4f5;
+  --popover: #121214;
+  --popover-foreground: #f4f4f5;
+  
+  --primary: #00f0ff; /* Neon Cyan */
+  --primary-foreground: #000000;
+  
+  --secondary: #1c1c21; /* Dark panel */
+  --secondary-foreground: #00f0ff; /* Cyan accents on panels */
+  
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  
+  --accent: #1e293b;
+  --accent-foreground: #00f0ff;
+  
+  --destructive: #ff2a2a; /* High-alert Red */
+  --destructive-foreground: #ffffff;
+  
+  --border: rgba(0, 240, 255, 0.2); /* Neon Cyan subtle border */
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: #00f0ff;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-primary selection:text-primary-foreground;
+  }
+}
+
+/* Glassmorphism utilities */
+.glass-panel {
+  @apply bg-card/60 backdrop-blur-xl border border-border shadow-[0_0_15px_rgba(0,240,255,0.05)];
+}
+
+.glass-panel-neon {
+  @apply bg-card/80 backdrop-blur-2xl border border-primary/40 shadow-[0_0_20px_rgba(0,240,255,0.15)];
+}

@@ -1,0 +1,129 @@
+import torch
+import torchvision.models as models
+from torchvision import transforms
+from PIL import Image
+import io
+import cv2
+import numpy as np
+import base64
+
+# Setup Device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+try:
+    weights = models.EfficientNet_B4_Weights.DEFAULT
+    model = models.efficientnet_b4(weights=weights)
+    
+    num_ftrs = model.classifier[1].in_features
+    # Binary classification Face verification Fake vs Real
+    model.classifier[1] = torch.nn.Linear(num_ftrs, 1)
+    
+    model = model.to(device)
+    model.eval()
+    print(f"EfficientNet-B4 loaded successfully with Real Weights on {device}")
+except Exception as e:
+    print(f"Error loading model: {e}")
+    model = None
+
+# Pre-processing
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+
+class GradCAM:
+    def __init__(self, model, target_layer):
+        self.model = model
+        self.target_layer = target_layer
+        self.gradients = None
+        self.activations = None
+        
+        self.target_layer.register_forward_hook(self.save_activation)
+        self.target_layer.register_full_backward_hook(self.save_gradient)
+
+    def save_activation(self, module, input, output):
+        self.activations = output
+
+    def save_gradient(self, module, grad_input, grad_output):
+        self.gradients = grad_output[0]
+
+    def generate(self, input_tensor):
+        self.model.zero_grad()
+        output = self.model(input_tensor)
+        
+        target = output[0, 0] # Binary classification output
+        target.backward(retain_graph=True)
+        
+        gradients = self.gradients.data.cpu().numpy()[0]
+        activations = self.activations.data.cpu().numpy()[0]
+        
+        weights = np.mean(gradients, axis=(1, 2))
+        
+        cam = np.zeros(activations.shape[1:], dtype=np.float32)
+        for i, w in enumerate(weights):
+            cam += w * activations[i]
+            
+        cam = np.maximum(cam, 0)
+        cam = cv2.resize(cam, (input_tensor.shape[3], input_tensor.shape[2]))
+        cam = cam - np.min(cam)
+        cam_max = np.max(cam)
+        if cam_max > 0:
+            cam = cam / cam_max
+            
+        return cam, torch.sigmoid(output).item()
+
+def generate_heatmap_base64(image_np: np.ndarray, cam_mask: np.ndarray) -> str:
+    cam_mask_resized = cv2.resize(cam_mask, (image_np.shape[1], image_np.shape[0]))
+    heatmap = cv2.applyColorMap(np.uint8(255 * cam_mask_resized), cv2.COLORMAP_JET)
+    heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+    
+    alpha = 0.5
+    overlay = cv2.addWeighted(image_np, 1 - alpha, heatmap, alpha, 0)
+    
+    overlay_img = Image.fromarray(overlay)
+    buffered = io.BytesIO()
+    overlay_img.save(buffered, format="JPEG", quality=85)
+    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    
+    return f"data:image/jpeg;base64,{img_str}"
+
+if model is not None:
+    # EfficientNet-b4 features[-1] is the last Conv2dNormActivation block
+    target_layer = model.features[-1]
+    grad_cam = GradCAM(model, target_layer)
+
+def predict_single_image(image: Image.Image):
+    image = image.convert("RGB")
+    input_tensor = transform(image).unsqueeze(0).to(device)
+    input_tensor.requires_grad = True # Required for Grad-CAM
+    
+    # Needs to be train mode for gradients if gradcam demands it, but eval is fine if we use requires_grad on input.
+    # Actually wait: some layers like batchnorm might behave differently. eval() + requires_grad=True is standard.
+    
+    cam_mask, probability = grad_cam.generate(input_tensor)
+    
+    is_fake = probability > 0.5
+    confidence = probability if is_fake else 1 - probability
+    
+    image_np = np.array(image)
+    heatmap_b64 = generate_heatmap_base64(image_np, cam_mask)
+    
+    return {
+        "is_fake": is_fake,
+        "confidence": confidence,
+        "probability": probability,
+        "heatmap": heatmap_b64
+    }
+
+def predict(image_bytes: bytes) -> dict:
+    if model is None:
+        raise RuntimeError("Model was not loaded correctly.")
+    
+    image = Image.open(io.BytesIO(image_bytes))
+    res = predict_single_image(image)
+    return {
+        "is_fake": res["is_fake"],
+        "confidence": round(res["confidence"] * 100, 2),
+        "heatmap_url": res["heatmap"]
+    }
