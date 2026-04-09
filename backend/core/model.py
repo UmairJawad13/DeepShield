@@ -1,6 +1,6 @@
 import torch
-import torchvision.models as models
-from torchvision import transforms
+# import torchvision.models as models
+# from torchvision import transforms
 from PIL import Image
 import io
 import cv2
@@ -10,27 +10,28 @@ import base64
 # Setup Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-try:
-    weights = models.EfficientNet_B0_Weights.DEFAULT
-    model = models.efficientnet_b0(weights=weights)
-    
-    num_ftrs = model.classifier[1].in_features
-    # Binary classification Face verification Fake vs Real
-    model.classifier[1] = torch.nn.Linear(num_ftrs, 1)
-    
-    model = model.to(device)
-    model.eval()
-    print(f"EfficientNet-B0 loaded successfully with Real Weights on {device}")
-except Exception as e:
-    print(f"Error loading model: {e}")
-    model = None
+model = None
+# try:
+#     weights = models.EfficientNet_B0_Weights.DEFAULT
+#     model = models.efficientnet_b0(weights=weights)
+#     
+#     num_ftrs = model.classifier[1].in_features
+#     # Binary classification Face verification Fake vs Real
+#     model.classifier[1] = torch.nn.Linear(num_ftrs, 1)
+#     
+#     model = model.to(device)
+#     model.eval()
+#     print(f"EfficientNet-B0 loaded successfully with Real Weights on {device}")
+# except Exception as e:
+#     print(f"Error loading model: {e}")
+#     model = None
 
 # Pre-processing
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-])
+# transform = transforms.Compose([
+#     transforms.Resize((224, 224)),
+#     transforms.ToTensor(),
+#     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+# ])
 
 class GradCAM:
     def __init__(self, model, target_layer):

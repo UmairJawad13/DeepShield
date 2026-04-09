@@ -125,33 +125,15 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
 
 
 @router.post("/detect", response_model=Dict[str, Any])
-async def detect_deepfake(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def detect_deepfake(file: UploadFile = File(...)):
     """
-    Standardized API endpoint for detection supporting Images & Video.
-    Uses background tasks to prevent blocking.
+    BYPASS MODE: Returns a hardcoded success response immediately without using AI inference.
     """
-    is_video = file.content_type.startswith("video/") or file.filename.endswith((".mp4", ".mov"))
-    is_image = file.content_type.startswith("image/")
-    
-    if not (is_image or is_video):
-        raise HTTPException(status_code=400, detail="File must be an image or video (.mp4/.mov).")
-        
-    file_bytes = await file.read()
-    
-    # Save to temporary file to process with OpenCV easily if needed
-    fd, temp_path = tempfile.mkstemp(suffix=os.path.splitext(file.filename)[1])
-    with os.fdopen(fd, 'wb') as f:
-        f.write(file_bytes)
-    
-    task_id = str(uuid.uuid4())
-    results_store[task_id] = {"status": "processing"}
-    
-    background_tasks.add_task(process_file, task_id, temp_path, is_video, file.filename)
-    
+    # Return exactly the requested JSON payload immediately
     return {
-        "task_id": task_id,
-        "message": "Media processing started.",
-        "status_url": f"/api/detect/{task_id}"
+        "status": "success",
+        "is_deepfake": False,
+        "confidence": 0.99
     }
 
 @router.get("/detect/{task_id}", response_model=Dict[str, Any])
