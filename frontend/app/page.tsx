@@ -120,7 +120,7 @@ export default function DeepShieldDashboard() {
 
       setProgress(30);
 
-      const apiUrl = "https://deepshield-production-4077.up.railway.app";
+      const apiUrl = "https://subcoriaceous-apolitically-neely.ngrok-free.dev";
       const response = await fetch(`${apiUrl}/api/detect`, {
         method: "POST",
         body: formData,
@@ -128,7 +128,7 @@ export default function DeepShieldDashboard() {
 
       if (!response.ok) throw new Error("Upload Failed");
       const initData = await response.json();
-      
+
       // Handle the Bypass Mode JSON immediately
       if (initData.status === "success") {
         setProgress(100);
@@ -150,7 +150,7 @@ export default function DeepShieldDashboard() {
 
       // Poll for background task completion
       const pollInterval = setInterval(async () => {
-        const apiUrl = "https://deepshield-production-4077.up.railway.app";
+        const apiUrl = "https://subcoriaceous-apolitically-neely.ngrok-free.dev";
         const pollRes = await fetch(`${apiUrl}/api/detect/${taskId}`);
         if (!pollRes.ok) return;
 
@@ -206,7 +206,7 @@ export default function DeepShieldDashboard() {
         </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground font-mono">
           <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-black/40 border border-primary/20 rounded-full text-xs">
-            <span className="text-primary font-bold">Architecture:</span> EfficientNet-B0 | <span className="text-primary font-bold">Engine:</span> PyTorch | <span className="text-primary font-bold">XAI:</span> Disabled
+            <span className="text-primary font-bold">Architecture:</span> EfficientNet-B4 | <span className="text-primary font-bold">Engine:</span> PyTorch | <span className="text-primary font-bold">XAI:</span> Grad-CAM
           </div>
           <span className="flex items-center gap-2"><Activity className="w-4 h-4 text-primary animate-pulse" /> SYSTEM: ONLINE</span>
 
