@@ -58,7 +58,7 @@ export default function DeepShieldDashboard() {
     if (saved) {
       try {
         setHistory(JSON.parse(saved));
-      } catch (e) {}
+      } catch (e) { }
     }
   }, []);
 
@@ -101,7 +101,7 @@ export default function DeepShieldDashboard() {
       return;
     }
     setFile(selectedFile);
-    
+
     // For video, we might not always have a neat preview immediately from ObjectURL if it's large, but standard video tags can use it.
     // For now, we will use it
     setPreviewUrl(URL.createObjectURL(selectedFile));
@@ -120,7 +120,7 @@ export default function DeepShieldDashboard() {
 
       setProgress(30);
 
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+      const apiUrl = "https://deepshield-production-4077.up.railway.app";
       const response = await fetch(`${apiUrl}/api/detect`, {
         method: "POST",
         body: formData,
@@ -128,6 +128,21 @@ export default function DeepShieldDashboard() {
 
       if (!response.ok) throw new Error("Upload Failed");
       const initData = await response.json();
+      
+      // Handle the Bypass Mode JSON immediately
+      if (initData.status === "success") {
+        setProgress(100);
+        const bypassResult = {
+          is_fake: initData.is_deepfake,
+          confidence: initData.confidence * 100, // Converts 0.99 to 99
+          heatmap_url: "",
+          metadata: { model: "Bypass Validation", analysis: { camera_make: "Mock Data" } }
+        };
+        setResult(bypassResult);
+        setTimeout(() => setStatus("results"), 500);
+        return;
+      }
+
       const taskId = initData.task_id;
 
       setStatus("processing");
@@ -135,7 +150,7 @@ export default function DeepShieldDashboard() {
 
       // Poll for background task completion
       const pollInterval = setInterval(async () => {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+        const apiUrl = "https://deepshield-production-4077.up.railway.app";
         const pollRes = await fetch(`${apiUrl}/api/detect/${taskId}`);
         if (!pollRes.ok) return;
 
@@ -194,7 +209,7 @@ export default function DeepShieldDashboard() {
             <span className="text-primary font-bold">Architecture:</span> EfficientNet-B0 | <span className="text-primary font-bold">Engine:</span> PyTorch | <span className="text-primary font-bold">XAI:</span> Disabled
           </div>
           <span className="flex items-center gap-2"><Activity className="w-4 h-4 text-primary animate-pulse" /> SYSTEM: ONLINE</span>
-          
+
           <Sheet>
             <SheetTrigger asChild>
               <Button variant="outline" size="sm" className="bg-black/50 border-primary/30 text-white hover:bg-primary/20 hover:text-primary transition-all">
@@ -216,8 +231,8 @@ export default function DeepShieldDashboard() {
                   <p className="text-gray-500 text-sm text-center py-10">No recent scans found.</p>
                 ) : (
                   history.map((item) => (
-                    <div 
-                      key={item.id} 
+                    <div
+                      key={item.id}
                       onClick={() => {
                         setResult(item.result);
                         setPreviewUrl(item.thumbnail);
