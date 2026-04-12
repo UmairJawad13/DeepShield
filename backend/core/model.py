@@ -1,3 +1,4 @@
+import os
 import torch
 import torchvision.models as models
 from torchvision import transforms
@@ -6,34 +7,51 @@ import io
 import cv2
 import numpy as np
 import base64
-import mediapipe as mp
-import mediapipe as mp
 
 # Force OpenCV Fallback for robustness
-USE_MP = False
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
 # Setup Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# 3. Architecture & Weights Synchronization
+model_path = "DeepShield.pth"
+architecture_loaded = "Unknown"
+
 try:
-    weights = models.EfficientNet_B4_Weights.DEFAULT
-    model = models.efficientnet_b4(weights=weights)
-    
+    model = models.efficientnet_b4()
     num_ftrs = model.classifier[1].in_features
-    # Binary classification Face verification Fake vs Real
     model.classifier[1] = torch.nn.Linear(num_ftrs, 1)
     
+    if os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        architecture_loaded = "B4"
+    else:
+        model = models.efficientnet_b4(weights=models.EfficientNet_B4_Weights.DEFAULT)
+        model.classifier[1] = torch.nn.Linear(num_ftrs, 1)
+        architecture_loaded = "B4"
+        
     model = model.to(device)
     model.eval()
-    print(f"EfficientNet-B4 loaded successfully with Real Weights on {device}")
 except Exception as e:
-    print(f"Error loading model: {e}")
-    model = None
+    print(f"[SYSTEM] B4 Initialization failed: {e}. Falling back to EfficientNet-B0.")
+    model = models.efficientnet_b0()
+    num_ftrs = model.classifier[1].in_features
+    model.classifier[1] = torch.nn.Linear(num_ftrs, 1)
+    
+    if os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        architecture_loaded = "B0"
+    else:
+        model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
+        model.classifier[1] = torch.nn.Linear(num_ftrs, 1)
+        architecture_loaded = "B0"
+        
+    model = model.to(device)
+    model.eval()
 
 # Pre-processing transforms
 transform = transforms.Compose([
-    transforms.Resize((224, 224)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
@@ -77,6 +95,7 @@ class GradCAM:
         if cam_max > 0:
             cam = cam / cam_max
             
+        # Standard Sigmoid Activation
         return cam, torch.sigmoid(output).item()
 
 def generate_heatmap_base64(image_np: np.ndarray, cam_mask: np.ndarray) -> str:
@@ -94,36 +113,18 @@ def generate_heatmap_base64(image_np: np.ndarray, cam_mask: np.ndarray) -> str:
     
     return f"data:image/jpeg;base64,{img_str}"
 
-def crop_to_face(image_np: np.ndarray, margin=0.2):
+def crop_to_face(image_np: np.ndarray, margin=0.30):
     h, w, _ = image_np.shape
+    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
     
-    xmin, ymin, box_w, box_h = 0, 0, 0, 0
-    face_found = False
+    if len(faces) == 0:
+        return image_np
+        
+    faces = sorted((int(x), int(y), int(w_f), int(h_f)) for (x, y, w_f, h_f) in faces)
+    faces.sort(key=lambda x: x[2] * x[3], reverse=True)
+    xmin, ymin, box_w, box_h = faces[0]
     
-    if USE_MP:
-        with mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5) as face_detection:
-            results = face_detection.process(image_np)
-            if results.detections:
-                detection = results.detections[0]
-                bboxC = detection.location_data.relative_bounding_box
-                xmin = int(bboxC.xmin * w)
-                ymin = int(bboxC.ymin * h)
-                box_w = int(bboxC.width * w)
-                box_h = int(bboxC.height * h)
-                face_found = True
-    else:
-        gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
-        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-        if len(faces) > 0:
-            faces = sorted((int(x), int(y), int(w_f), int(h_f)) for (x, y, w_f, h_f) in faces)
-            faces.sort(key=lambda x: x[2] * x[3], reverse=True)
-            xmin, ymin, box_w, box_h = faces[0]
-            face_found = True
-            
-    if not face_found:
-        return image_np # Fallback to original if no face found
-
-    # 20% margin
     margin_x = int(box_w * margin)
     margin_y = int(box_h * margin)
 
@@ -137,15 +138,8 @@ def crop_to_face(image_np: np.ndarray, margin=0.2):
         return image_np
     return cropped
 
-def apply_histogram_equalization(image_np: np.ndarray):
-    # Convert to YUV for equalizing only the Y channel (brightness)
-    img_yuv = cv2.cvtColor(image_np, cv2.COLOR_RGB2YUV)
-    img_yuv[:,:,0] = cv2.equalizeHist(img_yuv[:,:,0])
-    img_output = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2RGB)
-    return img_output
-
 if model is not None:
-    # EfficientNet-b4 features[-1] is the last Conv2dNormActivation block
+    # Get last conv layer depending on architecture
     target_layer = model.features[-1]
     grad_cam = GradCAM(model, target_layer)
 
@@ -153,26 +147,26 @@ def predict_single_image(image: Image.Image):
     image = image.convert("RGB")
     image_np = np.array(image)
     
-    # 1. Pipeline: MediaPipe/OpenCV Face Cropping (with 20% margin)
-    cropped_np = crop_to_face(image_np, margin=0.2)
+    # 1. Contextual Face Extraction (CRITICAL)
+    cropped_np = crop_to_face(image_np, margin=0.30)
 
-    # High-Quality Resizing (Preserves RGB artifact fidelity)
-    resized_np = cv2.resize(cropped_np, (224, 224), interpolation=cv2.INTER_AREA)
-    final_image = Image.fromarray(resized_np)
+    # 2. High-Frequency Preservation (Resizing)
+    resized_np = cv2.resize(cropped_np, (224, 224), interpolation=cv2.INTER_LANCZOS4)
     
-    input_tensor = transform(final_image).unsqueeze(0).to(device)
+    # 4. Pure Normalization (applied directly to RGB interpolation)
+    input_tensor = transform(resized_np).unsqueeze(0).to(device)
     input_tensor.requires_grad = True # Required for Grad-CAM
     
     cam_mask, probability = grad_cam.generate(input_tensor)
     
-    # Standard 50-50 decision threshold based on raw sigmoid range (20-95%)
+    print(f"[SYSTEM] Architecture Loaded: {architecture_loaded} | Raw Score: {probability:.4f}")
+    
     threshold = 0.50
     is_fake = probability >= threshold
     
     if is_fake:
          confidence = probability
     else:
-         # Uniform distribution for authentic probabilities mapping to (50-100% genuine certainty)
          confidence = 1.0 - probability
          
     # Grad-CAM mapped directly to cropped array
@@ -184,7 +178,7 @@ def predict_single_image(image: Image.Image):
         "confidence": confidence,
         "probability": probability,
         "heatmap": heatmap_b64,
-        "high_suspicion": 0.50 <= probability < 0.60
+        "architecture": architecture_loaded
     }
 
 def predict(image_bytes: bytes) -> dict:
