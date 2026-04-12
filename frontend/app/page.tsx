@@ -123,6 +123,9 @@ export default function DeepShieldDashboard() {
       const apiUrl = "https://subcoriaceous-apolitically-neely.ngrok-free.dev";
       const response = await fetch(`${apiUrl}/api/detect`, {
         method: "POST",
+        headers: {
+          "ngrok-skip-browser-warning": "69420"
+        },
         body: formData,
       });
 
@@ -151,7 +154,11 @@ export default function DeepShieldDashboard() {
       // Poll for background task completion
       const pollInterval = setInterval(async () => {
         const apiUrl = "https://subcoriaceous-apolitically-neely.ngrok-free.dev";
-        const pollRes = await fetch(`${apiUrl}/api/detect/${taskId}`);
+        const pollRes = await fetch(`${apiUrl}/api/detect/${taskId}`, {
+          headers: {
+            "ngrok-skip-browser-warning": "69420"
+          }
+        });
         if (!pollRes.ok) return;
 
         const pollData = await pollRes.json();
