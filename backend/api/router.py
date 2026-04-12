@@ -4,6 +4,7 @@ import uuid
 import tempfile
 import os
 import cv2
+import io
 import numpy as np
 
 router = APIRouter()
@@ -125,6 +126,9 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
             }
             
     except Exception as e:
+        print(f"[SYSTEM] ERROR IN PROCESS FILE: {e}")
+        import traceback
+        traceback.print_exc()
         results_store[task_id] = {
             "status": "failed",
             "error": str(e)

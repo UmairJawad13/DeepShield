@@ -346,6 +346,28 @@ export default function DeepShieldDashboard() {
             </motion.div>
           )}
 
+          {/* Error View */}
+          {status === "error" && (
+            <motion.div
+              key="error"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="w-full max-w-2xl"
+            >
+              <Card className="glass-panel-neon border-destructive/50">
+                <CardHeader className="text-center pb-2">
+                  <AlertTriangle className="w-12 h-12 text-destructive mx-auto mb-2" />
+                  <CardTitle className="text-3xl font-bold tracking-tight text-white mb-2">Analysis Failed</CardTitle>
+                  <CardDescription className="text-base text-red-400">An unexpected system error occurred during inference.</CardDescription>
+                </CardHeader>
+                <CardContent className="pt-6 flex justify-center">
+                  <Button onClick={reset} className="bg-white/10 hover:bg-white/20 text-white">Return to Dashboard</Button>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
           {/* Processing / Scanning View */}
           {status === "processing" && (
             <motion.div
