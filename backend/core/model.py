@@ -1,37 +1,41 @@
 import torch
-# import torchvision.models as models
-# from torchvision import transforms
+import torchvision.models as models
+from torchvision import transforms
 from PIL import Image
 import io
 import cv2
 import numpy as np
 import base64
+import mediapipe as mp
 
 # Setup Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model = None
-# try:
-#     weights = models.EfficientNet_B0_Weights.DEFAULT
-#     model = models.efficientnet_b0(weights=weights)
-#     
-#     num_ftrs = model.classifier[1].in_features
-#     # Binary classification Face verification Fake vs Real
-#     model.classifier[1] = torch.nn.Linear(num_ftrs, 1)
-#     
-#     model = model.to(device)
-#     model.eval()
-#     print(f"EfficientNet-B0 loaded successfully with Real Weights on {device}")
-# except Exception as e:
-#     print(f"Error loading model: {e}")
-#     model = None
+# MediaPipe Initialization
+mp_face_detection = mp.solutions.face_detection
+face_detection = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
 
-# Pre-processing
-# transform = transforms.Compose([
-#     transforms.Resize((224, 224)),
-#     transforms.ToTensor(),
-#     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-# ])
+try:
+    weights = models.EfficientNet_B4_Weights.DEFAULT
+    model = models.efficientnet_b4(weights=weights)
+    
+    num_ftrs = model.classifier[1].in_features
+    # Binary classification Face verification Fake vs Real
+    model.classifier[1] = torch.nn.Linear(num_ftrs, 1)
+    
+    model = model.to(device)
+    model.eval()
+    print(f"EfficientNet-B4 loaded successfully with Real Weights on {device}")
+except Exception as e:
+    print(f"Error loading model: {e}")
+    model = None
+
+# Pre-processing transforms
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
 
 class GradCAM:
     def __init__(self, model, target_layer):
@@ -89,33 +93,73 @@ def generate_heatmap_base64(image_np: np.ndarray, cam_mask: np.ndarray) -> str:
     
     return f"data:image/jpeg;base64,{img_str}"
 
+def crop_to_face(image_np: np.ndarray, margin=0.2):
+    h, w, _ = image_np.shape
+    results = face_detection.process(image_np)
+    if not results.detections:
+        return image_np # Fallback to original if no face found
+
+    detection = results.detections[0]
+    bboxC = detection.location_data.relative_bounding_box
+    xmin = int(bboxC.xmin * w)
+    ymin = int(bboxC.ymin * h)
+    box_w = int(bboxC.width * w)
+    box_h = int(bboxC.height * h)
+
+    # 20% margin
+    margin_x = int(box_w * margin)
+    margin_y = int(box_h * margin)
+
+    x1 = max(0, xmin - margin_x)
+    y1 = max(0, ymin - margin_y)
+    x2 = min(w, xmin + box_w + margin_x)
+    y2 = min(h, ymin + box_h + margin_y)
+
+    cropped = image_np[y1:y2, x1:x2]
+    if cropped.size == 0:
+        return image_np
+    return cropped
+
+def apply_histogram_equalization(image_np: np.ndarray):
+    # Convert to YUV for equalizing only the Y channel (brightness)
+    img_yuv = cv2.cvtColor(image_np, cv2.COLOR_RGB2YUV)
+    img_yuv[:,:,0] = cv2.equalizeHist(img_yuv[:,:,0])
+    img_output = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2RGB)
+    return img_output
+
 if model is not None:
-    # EfficientNet-b0 features[-1] is the last Conv2dNormActivation block
-    # target_layer = model.features[-1]
-    # grad_cam = GradCAM(model, target_layer)
-    pass
+    # EfficientNet-b4 features[-1] is the last Conv2dNormActivation block
+    target_layer = model.features[-1]
+    grad_cam = GradCAM(model, target_layer)
 
 def predict_single_image(image: Image.Image):
     image = image.convert("RGB")
-    input_tensor = transform(image).unsqueeze(0).to(device)
-    # input_tensor.requires_grad = True # Required for Grad-CAM
+    image_np = np.array(image)
     
-    # Needs to be train mode for gradients if gradcam demands it, but eval is fine if we use requires_grad on input.
-    # Actually wait: some layers like batchnorm might behave differently. eval() + requires_grad=True is standard.
+    # 1. Pipeline: MediaPipe Face Cropping (with 20% margin)
+    cropped_np = crop_to_face(image_np, margin=0.2)
     
-    # cam_mask, probability = grad_cam.generate(input_tensor)
+    # 2. Pipeline: OpenCV Histogram Equalization (Lighting standardization)
+    equalized_np = apply_histogram_equalization(cropped_np)
     
-    # Standard forward pass since Grad-CAM is temporarily disabled
-    with torch.no_grad():
-        output = model(input_tensor)
-        probability = torch.sigmoid(output).item()
+    final_image = Image.fromarray(equalized_np)
+    input_tensor = transform(final_image).unsqueeze(0).to(device)
+    input_tensor.requires_grad = True # Required for Grad-CAM
     
-    is_fake = probability > 0.5
-    confidence = probability if is_fake else 1 - probability
+    cam_mask, probability = grad_cam.generate(input_tensor)
     
-    # image_np = np.array(image)
-    # heatmap_b64 = generate_heatmap_base64(image_np, cam_mask)
-    heatmap_b64 = ""
+    # 3. Decision Threshold (> 0.60 for Deepfake)
+    threshold = 0.60
+    is_fake = probability >= threshold
+    
+    if is_fake:
+         confidence = probability
+    else:
+         # Map probability < 0.75 uniformly into Authentic Confidence (0.0 to 1.0 logic, though mathematically bounded)
+         confidence = 1.0 - probability
+    
+    # 4. Grad-CAM mapped directly to the equalized cropped frame
+    heatmap_b64 = generate_heatmap_base64(equalized_np, cam_mask)
     
     return {
         "is_fake": is_fake,
