@@ -17,8 +17,8 @@ face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_fronta
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 try:
-    weights = models.EfficientNet_B0_Weights.IMAGENET1K_V1
-    model = models.efficientnet_b0(weights=weights)
+    weights = models.EfficientNet_B4_Weights.DEFAULT
+    model = models.efficientnet_b4(weights=weights)
     
     num_ftrs = model.classifier[1].in_features
     # Binary classification Face verification Fake vs Real
@@ -26,7 +26,7 @@ try:
     
     model = model.to(device)
     model.eval()
-    print(f"EfficientNet-B0 (ImageNet-1K) loaded successfully with Real Weights on {device}")
+    print(f"EfficientNet-B4 loaded successfully with Real Weights on {device}")
 except Exception as e:
     print(f"Error loading model: {e}")
     model = None
@@ -77,7 +77,7 @@ class GradCAM:
         if cam_max > 0:
             cam = cam / cam_max
             
-        return cam, torch.sigmoid(output).item()
+        return cam, output.item()
 
 def generate_heatmap_base64(image_np: np.ndarray, cam_mask: np.ndarray) -> str:
     cam_mask_resized = cv2.resize(cam_mask, (image_np.shape[1], image_np.shape[0]))
@@ -146,17 +146,24 @@ def apply_histogram_equalization(image_np: np.ndarray):
 
 def apply_frequency_domain_preprocessing(image_np: np.ndarray):
     """
-    Applies a Laplacian Filter to highlight edge inconsistencies and concats it with the original image.
+    Applies CLAHE and then a Laplacian Filter to highlight edge inconsistencies.
     """
-    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+    # 1. CLAHE dynamic range normalization
+    img_yuv = cv2.cvtColor(image_np, cv2.COLOR_RGB2YUV)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    img_yuv[:, :, 0] = clahe.apply(img_yuv[:, :, 0])
+    clahe_img = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2RGB)
+
+    # 2. Extract edge map on CLAHE normalized layer
+    gray = cv2.cvtColor(clahe_img, cv2.COLOR_RGB2GRAY)
     laplacian = cv2.Laplacian(gray, cv2.CV_64F)
     laplacian_normalized = cv2.convertScaleAbs(laplacian)
     
-    # Create a 3-channel version of the edge map
+    # 3. Create a 3-channel version of the edge map
     edge_map = cv2.cvtColor(laplacian_normalized, cv2.COLOR_GRAY2RGB)
     
-    # Blend the edge map and the original image (50/50 blend)
-    blended = cv2.addWeighted(image_np, 0.5, edge_map, 0.5, 0)
+    # Blend the edge map and the CLAHE image (50/50 blend)
+    blended = cv2.addWeighted(clahe_img, 0.5, edge_map, 0.5, 0)
     return blended
 
 def extract_face_patches(image_np: np.ndarray):
@@ -179,7 +186,7 @@ def extract_face_patches(image_np: np.ndarray):
     return [patch_tl, patch_tr, patch_bl, patch_br]
 
 if model is not None:
-    # EfficientNet-b0 features[-1] is the last Conv2dNormActivation block
+    # EfficientNet-b4 features[-1] is the last Conv2dNormActivation block
     target_layer = model.features[-1]
     grad_cam = GradCAM(model, target_layer)
 
@@ -197,6 +204,7 @@ def predict_single_image(image: Image.Image):
     patches = extract_face_patches(freq_np)
     
     patch_probs = []
+    patch_logits = []
     cam_masks = []
     
     for patch in patches:
@@ -204,13 +212,30 @@ def predict_single_image(image: Image.Image):
         input_tensor = transform(final_image).unsqueeze(0).to(device)
         input_tensor.requires_grad = True # Required for Grad-CAM
         
-        cam_mask, probability = grad_cam.generate(input_tensor)
+        cam_mask, logit = grad_cam.generate(input_tensor)
+        
+        # Temperature Scaling Polarization
+        temperature = 1.5
+        # Multiplying logit by temp mathematically 'stretches' it (comparable to dividing by T < 1)
+        scaled_logit = logit * temperature
+        probability = float(torch.sigmoid(torch.tensor(scaled_logit)).item())
+        
         patch_probs.append(probability)
+        patch_logits.append(logit)
         cam_masks.append(cam_mask)
         
-    # Aggregate probabilities (Mean across patches)
-    avg_probability = float(np.mean(patch_probs))
+    # Aggregate probabilities (Geometric Mean across patches)
+    import math
+    avg_probability = math.exp(sum(math.log(p + 1e-7) for p in patch_probs) / len(patch_probs))
+    
+    # Feature Calibration Priority Map
+    if any(p > 0.70 for p in patch_probs):
+        avg_probability = max(patch_probs) # Overrides geometric mean if heavily manipulated patch detected
+        
     variance = float(np.var(patch_probs))
+    
+    # Logging the logits and score
+    print(f"Raw Logits: {[round(l, 3) for l in patch_logits]} | Calibrated Score: {avg_probability:.4f}")
     
     # Base Grad-CAM on the patch with the highest fake probability (typically eyes/mouth area)
     max_prob_idx = np.argmax(patch_probs)
