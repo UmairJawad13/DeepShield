@@ -7,14 +7,12 @@ import cv2
 import numpy as np
 import base64
 import mediapipe as mp
-from mediapipe.python.solutions import face_detection as mp_face_detection
 
 # Setup Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # MediaPipe Initialization
-# This bypasses the broken 'solutions' shortcut
-face_detector = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+mp_face_detection = mp.solutions.face_detection
 
 try:
     weights = models.EfficientNet_B0_Weights.DEFAULT
@@ -96,7 +94,8 @@ def generate_heatmap_base64(image_np: np.ndarray, cam_mask: np.ndarray) -> str:
 
 def crop_to_face(image_np: np.ndarray, margin=0.2):
     h, w, _ = image_np.shape
-    results = face_detector.process(image_np)
+    with mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5) as face_detection:
+        results = face_detection.process(image_np)
     if not results.detections:
         return image_np # Fallback to original if no face found
 
