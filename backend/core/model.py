@@ -144,6 +144,18 @@ def apply_histogram_equalization(image_np: np.ndarray):
     img_output = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2RGB)
     return img_output
 
+if model is not None:
+    # EfficientNet-b4 features[-1] is the last Conv2dNormActivation block
+    target_layer = model.features[-1]
+    grad_cam = GradCAM(model, target_layer)
+
+def predict_single_image(image: Image.Image):
+    image = image.convert("RGB")
+    image_np = np.array(image)
+    
+    # 1. Pipeline: MediaPipe/OpenCV Face Cropping (with 20% margin)
+    cropped_np = crop_to_face(image_np, margin=0.2)
+
     # High-Quality Resizing (Preserves RGB artifact fidelity)
     resized_np = cv2.resize(cropped_np, (224, 224), interpolation=cv2.INTER_AREA)
     final_image = Image.fromarray(resized_np)
