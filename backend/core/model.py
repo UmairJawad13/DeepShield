@@ -24,7 +24,7 @@ try:
     model.classifier[1] = torch.nn.Linear(num_ftrs, 1)
     
     if os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path, map_location=device))
+        model.load_state_dict(torch.load(model_path, map_location='cpu'), strict=True)
         architecture_loaded = "B4"
     else:
         model = models.efficientnet_b4(weights=models.EfficientNet_B4_Weights.DEFAULT)
@@ -33,14 +33,15 @@ try:
         
     model = model.to(device)
     model.eval()
+    print("[SYSTEM] Strict BGR2RGB and Binary Head applied.")
 except Exception as e:
     print(f"[SYSTEM] B4 Initialization failed: {e}. Falling back to EfficientNet-B0.")
     model = models.efficientnet_b0()
     num_ftrs = model.classifier[1].in_features
-    model.classifier[1] = torch.nn.Linear(num_ftrs, 1)
+    model.classifier[1] = torch.nn.Linear(num_ftrs, 1) # Force Binary Output
     
     if os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path, map_location=device))
+        model.load_state_dict(torch.load(model_path, map_location='cpu'), strict=True)
         architecture_loaded = "B0"
     else:
         model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
@@ -143,10 +144,10 @@ if model is not None:
     target_layer = model.features[-1]
     grad_cam = GradCAM(model, target_layer)
 
-def predict_single_image(image: Image.Image):
-    image = image.convert("RGB")
-    image_np = np.array(image)
-    
+def predict_single_image(image_np: np.ndarray):
+    """
+    image_np: strictly an RGB numpy array decoded from OpenCV bytes
+    """
     # 1. Contextual Face Extraction (CRITICAL)
     cropped_np = crop_to_face(image_np, margin=0.30)
 
@@ -185,8 +186,16 @@ def predict(image_bytes: bytes) -> dict:
     if model is None:
         raise RuntimeError("Model was not loaded correctly.")
     
-    image = Image.open(io.BytesIO(image_bytes))
-    res = predict_single_image(image)
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    if image_bgr is None:
+        raise ValueError("Failed to decode image stream.")
+    
+    # Enforce BGR to RGB Conversion
+    image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    
+    res = predict_single_image(image_rgb)
     return {
         "is_fake": res["is_fake"],
         "confidence": round(res["confidence"] * 100, 2),

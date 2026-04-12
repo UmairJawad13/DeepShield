@@ -44,12 +44,11 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
                     break
                     
                 if frame_count % frame_interval == 0:
-                    # Convert cv2 frame (BGR) to RGB PIL Image
+                    # Convert cv2 frame (BGR) to RGB numpy array
                     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    pil_img = Image.fromarray(rgb_frame)
                     
-                    # Run inference on frame
-                    res = predict_single_image(pil_img)
+                    # Run inference natively on matrix
+                    res = predict_single_image(rgb_frame)
                     prob = res["probability"]
                     probabilities.append(prob)
                     
@@ -98,8 +97,16 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
             with open(file_path, "rb") as f:
                 image_bytes = f.read()
                 
-            image = Image.open(io.BytesIO(image_bytes)) if 'io' in locals() else Image.open(file_path)
-            res = predict_single_image(image)
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if image_bgr is None:
+                 raise ValueError("Failed to decode image bytes natively.")
+                 
+            # Enforce BGR to RGB Conversion natively before hitting pipeline
+            image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+                 
+            res = predict_single_image(image_rgb)
             image_metadata = analyze_metadata(image_bytes)
             
             if res.get("high_suspicion", False):
