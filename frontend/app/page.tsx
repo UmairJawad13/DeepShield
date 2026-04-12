@@ -448,8 +448,8 @@ export default function DeepShieldDashboard() {
                           <span className="text-white text-base">{result.confidence}%</span>
                         </div>
                         <div className="w-full h-1.5 bg-black rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full ${result.is_fake ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)]' : 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]'}`} 
+                          <div
+                            className={`h-full ${result.is_fake ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)]' : 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]'}`}
                             style={{ width: `${result.confidence}%` }}>
                           </div>
                         </div>
