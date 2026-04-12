@@ -32,8 +32,14 @@ document.addEventListener('DOMContentLoaded', () => {
           const formData = new FormData();
           formData.append('file', blob, 'screenshot.png');
 
-          const detectRes = await fetch('http://127.0.0.1:8000/api/detect', {
+          const API_BASE = 'https://subcoriaceous-apolitically-neely.ngrok-free.dev';
+          console.log(`Sending image for analysis to ${API_BASE}/api/detect...`);
+
+          const detectRes = await fetch(`${API_BASE}/api/detect`, {
             method: 'POST',
+            headers: {
+              "ngrok-skip-browser-warning": "69420"
+            },
             body: formData
           });
 
@@ -47,9 +53,14 @@ document.addEventListener('DOMContentLoaded', () => {
           // 4. Poll for result
           const pollResult = async () => {
             try {
-              const pollRes = await fetch(`http://127.0.0.1:8000/api/detect/${taskId}`);
+              console.log(`Checking status for task: ${taskId}`);
+              const pollRes = await fetch(`${API_BASE}/api/detect/${taskId}`, {
+                headers: {
+                  "ngrok-skip-browser-warning": "69420"
+                }
+              });
               if (!pollRes.ok) throw new Error('Polling failed');
-              
+
               const pollData = await pollRes.json();
               if (pollData.status === 'completed') {
                 displayResult(pollData.result);
@@ -78,9 +89,9 @@ document.addEventListener('DOMContentLoaded', () => {
     loader.style.display = 'none';
     statusText.textContent = 'Analysis complete.';
     snapBtn.disabled = false;
-    
+
     resultsDiv.style.display = 'flex';
-    
+
     if (result.is_fake) {
       verdictEl.textContent = 'DEEPFAKE';
       verdictEl.className = 'verdict fake';
@@ -88,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
       verdictEl.textContent = 'AUTHENTIC';
       verdictEl.className = 'verdict real';
     }
-    
+
     confidenceEl.textContent = result.confidence;
     heatmapImg.src = result.heatmap_url;
   }
