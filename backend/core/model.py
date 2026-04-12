@@ -18,8 +18,8 @@ except AttributeError:
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 try:
-    weights = models.EfficientNet_B0_Weights.DEFAULT
-    model = models.efficientnet_b0(weights=weights)
+    weights = models.EfficientNet_B4_Weights.DEFAULT
+    model = models.efficientnet_b4(weights=weights)
     
     num_ftrs = model.classifier[1].in_features
     # Binary classification Face verification Fake vs Real
@@ -27,7 +27,7 @@ try:
     
     model = model.to(device)
     model.eval()
-    print(f"EfficientNet-B0 loaded successfully with Real Weights on {device}")
+    print(f"EfficientNet-B4 loaded successfully with Real Weights on {device}")
 except Exception as e:
     print(f"Error loading model: {e}")
     model = None
@@ -145,8 +145,12 @@ def apply_histogram_equalization(image_np: np.ndarray):
     img_output = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2RGB)
     return img_output
 
+def apply_sharpening(image_np: np.ndarray):
+    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+    return cv2.filter2D(image_np, -1, kernel)
+
 if model is not None:
-    # EfficientNet-b0 features[-1] is the last Conv2dNormActivation block
+    # EfficientNet-b4 features[-1] is the last Conv2dNormActivation block
     target_layer = model.features[-1]
     grad_cam = GradCAM(model, target_layer)
 
@@ -160,31 +164,35 @@ def predict_single_image(image: Image.Image):
     # 2. Pipeline: OpenCV Histogram Equalization (Lighting standardization)
     equalized_np = apply_histogram_equalization(cropped_np)
     
-    final_image = Image.fromarray(equalized_np)
+    # 2b. Pipeline: OpenCV Kernel Sharpening (Texture enhancement)
+    sharpened_np = apply_sharpening(equalized_np)
+    
+    final_image = Image.fromarray(sharpened_np)
     input_tensor = transform(final_image).unsqueeze(0).to(device)
     input_tensor.requires_grad = True # Required for Grad-CAM
     
     cam_mask, probability = grad_cam.generate(input_tensor)
     
-    # 3. Decision Threshold (> 0.60 for Deepfake)
-    threshold = 0.60
+    # 3. Decision Threshold (> 0.50 for Deepfake)
+    threshold = 0.50
     is_fake = probability >= threshold
     
     if is_fake:
          confidence = probability
     else:
-         # Map probability < 0.75 uniformly into Authentic Confidence (0.0 to 1.0 logic, though mathematically bounded)
+         # Map probability < 0.50 uniformly into Authentic Confidence
          confidence = 1.0 - probability
     
-    # 4. Grad-CAM mapped directly to the equalized cropped frame
-    heatmap_b64 = generate_heatmap_base64(equalized_np, cam_mask)
+    # 4. Grad-CAM mapped directly to the sharpened frame
+    heatmap_b64 = generate_heatmap_base64(sharpened_np, cam_mask)
     
     return {
         "is_fake": is_fake,
         "is_deepfake": is_fake,
         "confidence": confidence,
         "probability": probability,
-        "heatmap": heatmap_b64
+        "heatmap": heatmap_b64,
+        "high_suspicion": 0.50 <= probability < 0.60
     }
 
 def predict(image_bytes: bytes) -> dict:

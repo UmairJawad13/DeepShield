@@ -22,7 +22,7 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
     
     try:
         if model is None:
-            raise Exception("EfficientNet-B0 model failed to initialize.")
+            raise Exception("EfficientNet-B4 model failed to initialize.")
             
         if is_video:
             cap = cv2.VideoCapture(file_path)
@@ -65,9 +65,12 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
                 raise Exception("No frames could be extracted from the video.")
                 
             avg_prob = sum(probabilities) / len(probabilities)
-            final_is_fake = avg_prob >= 0.60
+            final_is_fake = avg_prob >= 0.50
             final_confidence = avg_prob if final_is_fake else 1 - avg_prob
             
+            is_suspicious_video = 0.50 <= avg_prob < 0.60
+            suspicious_reasons = ["High Suspicion: Video frames exhibit borderline manipulative artifacts."] if is_suspicious_video else []
+
             results_store[task_id] = {
                 "status": "completed",
                 "result": {
@@ -76,10 +79,11 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
                     "confidence": round(final_confidence * 100, 2),
                     "heatmap_url": best_heatmap,
                     "metadata": {
-                        "model": "EfficientNet-B0 (PyTorch)",
+                        "model": "EfficientNet-B4 (PyTorch)",
                         "model_status": "loaded",
                         "analysis": {
-                            "is_suspicious": False,
+                            "is_suspicious": is_suspicious_video,
+                            "suspicious_reasons": suspicious_reasons,
                             "camera_make": "Video Engine",
                             "camera_model": "Forensic Extractor",
                             "software": "OpenCV",
@@ -98,6 +102,12 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
             res = predict_single_image(image)
             image_metadata = analyze_metadata(image_bytes)
             
+            if res.get("high_suspicion", False):
+                image_metadata["is_suspicious"] = True
+                if "suspicious_reasons" not in image_metadata:
+                    image_metadata["suspicious_reasons"] = []
+                image_metadata["suspicious_reasons"].append("High Suspicion: Core prediction falls within the baseline manipulation buffer (50-60%).")
+                
             results_store[task_id] = {
                 "status": "completed",
                 "result": {
@@ -106,7 +116,7 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
                     "confidence": round(res["confidence"] * 100, 2),
                     "heatmap_url": res["heatmap"],
                     "metadata": {
-                        "model": "EfficientNet-B0 (PyTorch)",
+                        "model": "EfficientNet-B4 (PyTorch)",
                         "model_status": "loaded",
                         "analysis": image_metadata
                     }
