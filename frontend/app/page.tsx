@@ -215,7 +215,13 @@ export default function DeepShieldDashboard() {
           <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-black/40 border border-primary/20 rounded-full text-xs">
             <span className="text-primary font-bold">Architecture:</span> EfficientNet-B4 | <span className="text-primary font-bold">Engine:</span> PyTorch | <span className="text-primary font-bold">XAI:</span> Grad-CAM
           </div>
-          <span className="flex items-center gap-2"><Activity className="w-4 h-4 text-primary animate-pulse" /> SYSTEM: ONLINE</span>
+          <span className="flex items-center gap-2 tracking-widest font-bold">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+            </span>
+            SYSTEM: ONLINE
+          </span>
 
           <Sheet>
             <SheetTrigger asChild>
@@ -428,17 +434,25 @@ export default function DeepShieldDashboard() {
                     <CardDescription>Final diagnostic extracted from Convolutional layers</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-6">
-                    <div className="p-4 rounded-lg bg-black/40 border border-white/5 flex flex-col items-center justify-center gap-2 w-full overflow-hidden">
+                    <div className="p-4 rounded-lg bg-black/40 border border-white/5 flex flex-col items-center justify-center gap-2 w-full">
                       <span className="text-sm text-gray-400 font-mono">CLASSIFICATION</span>
-                      <h2 className={`text-2xl sm:text-3xl md:text-4xl font-bold tracking-widest uppercase text-center w-full break-normal whitespace-nowrap overflow-hidden text-ellipsis ${result.is_fake ? 'text-red-500 [text-shadow:0_0_15px_rgba(239,68,68,0.6)]' : 'text-cyan-400 [text-shadow:0_0_15px_rgba(34,211,238,0.6)]'}`}>
+                      <h2 className={`text-2xl md:text-3xl font-bold tracking-widest uppercase text-center w-full ${result.is_fake ? 'text-red-500 [text-shadow:0_0_15px_rgba(239,68,68,0.6)]' : 'text-cyan-400 [text-shadow:0_0_15px_rgba(34,211,238,0.6)]'}`}>
                         {result.is_fake ? 'DEEPFAKE' : 'AUTHENTIC'}
                       </h2>
                     </div>
 
                     <div className="space-y-3 font-mono text-sm">
-                      <div className="flex justify-between items-center py-2 border-b border-white/5">
-                        <span className="text-gray-400">Confidence Score</span>
-                        <span className="text-white text-base">{result.confidence}%</span>
+                      <div className="flex flex-col py-2 border-b border-white/5 gap-2">
+                        <div className="flex justify-between items-center w-full">
+                          <span className="text-gray-400">Confidence Score</span>
+                          <span className="text-white text-base">{result.confidence}%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-black rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full ${result.is_fake ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)]' : 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]'}`} 
+                            style={{ width: `${result.confidence}%` }}>
+                          </div>
+                        </div>
                       </div>
                       <div className="flex justify-between items-center py-2 border-b border-white/5">
                         <span className="text-gray-400">Detection Model</span>
@@ -541,11 +555,19 @@ export default function DeepShieldDashboard() {
                           </div>
                         )}
                         {!result.metadata.analysis.is_suspicious && (
-                          <div className="p-3 bg-primary/10 border border-primary/30 rounded-md">
-                            <h4 className="flex items-center gap-2 text-primary font-bold uppercase">
-                              <ShieldCheck className="w-4 h-4" /> Clean Metadata
-                            </h4>
-                          </div>
+                          (result.metadata.analysis.camera_make === "Unknown" || result.metadata.analysis.camera_model === "Unknown") && result.is_fake ? (
+                            <div className="p-3 bg-yellow-500/20 border border-yellow-500 rounded-md">
+                              <h4 className="flex items-center gap-2 text-yellow-500 font-bold uppercase">
+                                <AlertTriangle className="w-4 h-4" /> Metadata Stripped
+                              </h4>
+                            </div>
+                          ) : (
+                            <div className="p-3 bg-primary/10 border border-primary/30 rounded-md">
+                              <h4 className="flex items-center gap-2 text-primary font-bold uppercase">
+                                <ShieldCheck className="w-4 h-4" /> Clean Metadata
+                              </h4>
+                            </div>
+                          )
                         )}
                       </div>
                     )}
