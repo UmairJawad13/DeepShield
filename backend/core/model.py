@@ -7,12 +7,15 @@ import cv2
 import numpy as np
 import base64
 import mediapipe as mp
+try:
+    mp_face_detection = mp.solutions.face_detection
+    USE_MP = True
+except AttributeError:
+    USE_MP = False
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
 # Setup Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# MediaPipe Initialization
-mp_face_detection = mp.solutions.face_detection
 
 try:
     weights = models.EfficientNet_B0_Weights.DEFAULT
@@ -94,17 +97,32 @@ def generate_heatmap_base64(image_np: np.ndarray, cam_mask: np.ndarray) -> str:
 
 def crop_to_face(image_np: np.ndarray, margin=0.2):
     h, w, _ = image_np.shape
-    with mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5) as face_detection:
-        results = face_detection.process(image_np)
-    if not results.detections:
+    
+    xmin, ymin, box_w, box_h = 0, 0, 0, 0
+    face_found = False
+    
+    if USE_MP:
+        with mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5) as face_detection:
+            results = face_detection.process(image_np)
+            if results.detections:
+                detection = results.detections[0]
+                bboxC = detection.location_data.relative_bounding_box
+                xmin = int(bboxC.xmin * w)
+                ymin = int(bboxC.ymin * h)
+                box_w = int(bboxC.width * w)
+                box_h = int(bboxC.height * h)
+                face_found = True
+    else:
+        gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+        if len(faces) > 0:
+            faces = sorted((int(x), int(y), int(w_f), int(h_f)) for (x, y, w_f, h_f) in faces)
+            faces.sort(key=lambda x: x[2] * x[3], reverse=True)
+            xmin, ymin, box_w, box_h = faces[0]
+            face_found = True
+            
+    if not face_found:
         return image_np # Fallback to original if no face found
-
-    detection = results.detections[0]
-    bboxC = detection.location_data.relative_bounding_box
-    xmin = int(bboxC.xmin * w)
-    ymin = int(bboxC.ymin * h)
-    box_w = int(bboxC.width * w)
-    box_h = int(bboxC.height * h)
 
     # 20% margin
     margin_x = int(box_w * margin)
