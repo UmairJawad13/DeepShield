@@ -2,10 +2,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.router import router
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from api.router import router
-
 app = FastAPI(
     title="DeepShield API",
     description="Industry-ready deepfake detection system API.",

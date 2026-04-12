@@ -7,17 +7,18 @@ import cv2
 import numpy as np
 import base64
 import mediapipe as mp
+from mediapipe.python.solutions import face_detection as mp_face_detection
 
 # Setup Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # MediaPipe Initialization
-mp_face_detection = mp.solutions.face_detection
-face_detection = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+# This bypasses the broken 'solutions' shortcut
+face_detector = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
 
 try:
-    weights = models.EfficientNet_B4_Weights.DEFAULT
-    model = models.efficientnet_b4(weights=weights)
+    weights = models.EfficientNet_B0_Weights.DEFAULT
+    model = models.efficientnet_b0(weights=weights)
     
     num_ftrs = model.classifier[1].in_features
     # Binary classification Face verification Fake vs Real
@@ -25,7 +26,7 @@ try:
     
     model = model.to(device)
     model.eval()
-    print(f"EfficientNet-B4 loaded successfully with Real Weights on {device}")
+    print(f"EfficientNet-B0 loaded successfully with Real Weights on {device}")
 except Exception as e:
     print(f"Error loading model: {e}")
     model = None
@@ -95,7 +96,7 @@ def generate_heatmap_base64(image_np: np.ndarray, cam_mask: np.ndarray) -> str:
 
 def crop_to_face(image_np: np.ndarray, margin=0.2):
     h, w, _ = image_np.shape
-    results = face_detection.process(image_np)
+    results = face_detector.process(image_np)
     if not results.detections:
         return image_np # Fallback to original if no face found
 
@@ -128,7 +129,7 @@ def apply_histogram_equalization(image_np: np.ndarray):
     return img_output
 
 if model is not None:
-    # EfficientNet-b4 features[-1] is the last Conv2dNormActivation block
+    # EfficientNet-b0 features[-1] is the last Conv2dNormActivation block
     target_layer = model.features[-1]
     grad_cam = GradCAM(model, target_layer)
 
