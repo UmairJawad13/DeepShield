@@ -22,7 +22,7 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
     
     try:
         if model is None:
-            raise Exception("EfficientNet-B4 model failed to initialize.")
+            raise Exception("EfficientNet-B0 (ImageNet-1K) model failed to initialize.")
             
         if is_video:
             cap = cv2.VideoCapture(file_path)
@@ -65,24 +65,28 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
                 raise Exception("No frames could be extracted from the video.")
                 
             avg_prob = sum(probabilities) / len(probabilities)
-            final_is_fake = avg_prob >= 0.50
+            final_is_fake = avg_prob >= 0.40
+            
+            is_confirmed_deepfake = avg_prob >= 0.70
+            is_suspected = 0.40 <= avg_prob < 0.70
+            
             final_confidence = avg_prob if final_is_fake else 1 - avg_prob
             
-            is_suspicious_video = 0.50 <= avg_prob < 0.60
-            suspicious_reasons = ["High Suspicion: Video frames exhibit borderline manipulative artifacts."] if is_suspicious_video else []
+            suspicious_reasons = ["Suspected Manipulation: Global variance falls within intermediate threshold (40-70%)."] if is_suspected else []
 
             results_store[task_id] = {
                 "status": "completed",
                 "result": {
                     "is_fake": final_is_fake,
-                    "is_deepfake": final_is_fake,
+                    "is_deepfake": is_confirmed_deepfake,
+                    "is_suspected": is_suspected,
                     "confidence": round(final_confidence * 100, 2),
                     "heatmap_url": best_heatmap,
                     "metadata": {
-                        "model": "EfficientNet-B4 (PyTorch)",
+                        "model": "EfficientNet-B0 (PyTorch, ImageNet-1K)",
                         "model_status": "loaded",
                         "analysis": {
-                            "is_suspicious": is_suspicious_video,
+                            "is_suspicious": is_suspected,
                             "suspicious_reasons": suspicious_reasons,
                             "camera_make": "Video Engine",
                             "camera_model": "Forensic Extractor",
@@ -102,21 +106,22 @@ def process_file(task_id: str, file_path: str, is_video: bool, original_filename
             res = predict_single_image(image)
             image_metadata = analyze_metadata(image_bytes)
             
-            if res.get("high_suspicion", False):
+            if res.get("is_suspected", False):
                 image_metadata["is_suspicious"] = True
                 if "suspicious_reasons" not in image_metadata:
                     image_metadata["suspicious_reasons"] = []
-                image_metadata["suspicious_reasons"].append("High Suspicion: Core prediction falls within the baseline manipulation buffer (50-60%).")
+                image_metadata["suspicious_reasons"].append(f"Suspected Manipulation: Spatial Patch variance ({round(res.get('variance', 0) * 100, 2)}%) exceeds natural limits (40-70% total prob).")
                 
             results_store[task_id] = {
                 "status": "completed",
                 "result": {
                     "is_fake": res["is_fake"],
                     "is_deepfake": res.get("is_deepfake", res["is_fake"]),
+                    "is_suspected": res.get("is_suspected", False),
                     "confidence": round(res["confidence"] * 100, 2),
                     "heatmap_url": res["heatmap"],
                     "metadata": {
-                        "model": "EfficientNet-B4 (PyTorch)",
+                        "model": "EfficientNet-B0 (PyTorch, ImageNet-1K)",
                         "model_status": "loaded",
                         "analysis": image_metadata
                     }

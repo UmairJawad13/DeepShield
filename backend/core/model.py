@@ -7,19 +7,18 @@ import cv2
 import numpy as np
 import base64
 import mediapipe as mp
-try:
-    mp_face_detection = mp.solutions.face_detection
-    USE_MP = True
-except AttributeError:
-    USE_MP = False
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+import mediapipe as mp
+
+# Force OpenCV Fallback for robustness
+USE_MP = False
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
 # Setup Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 try:
-    weights = models.EfficientNet_B4_Weights.DEFAULT
-    model = models.efficientnet_b4(weights=weights)
+    weights = models.EfficientNet_B0_Weights.IMAGENET1K_V1
+    model = models.efficientnet_b0(weights=weights)
     
     num_ftrs = model.classifier[1].in_features
     # Binary classification Face verification Fake vs Real
@@ -27,7 +26,7 @@ try:
     
     model = model.to(device)
     model.eval()
-    print(f"EfficientNet-B4 loaded successfully with Real Weights on {device}")
+    print(f"EfficientNet-B0 (ImageNet-1K) loaded successfully with Real Weights on {device}")
 except Exception as e:
     print(f"Error loading model: {e}")
     model = None
@@ -145,12 +144,42 @@ def apply_histogram_equalization(image_np: np.ndarray):
     img_output = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2RGB)
     return img_output
 
-def apply_sharpening(image_np: np.ndarray):
-    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
-    return cv2.filter2D(image_np, -1, kernel)
+def apply_frequency_domain_preprocessing(image_np: np.ndarray):
+    """
+    Applies a Laplacian Filter to highlight edge inconsistencies and concats it with the original image.
+    """
+    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+    laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+    laplacian_normalized = cv2.convertScaleAbs(laplacian)
+    
+    # Create a 3-channel version of the edge map
+    edge_map = cv2.cvtColor(laplacian_normalized, cv2.COLOR_GRAY2RGB)
+    
+    # Blend the edge map and the original image (50/50 blend)
+    blended = cv2.addWeighted(image_np, 0.5, edge_map, 0.5, 0)
+    return blended
+
+def extract_face_patches(image_np: np.ndarray):
+    """
+    Extract 4 overlapping patches (top-left, top-right, bottom-left, bottom-right)
+    approximating Eyes, Nose, Mouth, and Chin areas.
+    """
+    h, w, _ = image_np.shape
+    h_mid = h // 2
+    w_mid = w // 2
+    
+    overlap_h = h // 8
+    overlap_w = w // 8
+    
+    patch_tl = image_np[0:h_mid + overlap_h, 0:w_mid + overlap_w]  # Left Eye / Top Nose
+    patch_tr = image_np[0:h_mid + overlap_h, w_mid - overlap_w:w]  # Right Eye / Top Nose
+    patch_bl = image_np[h_mid - overlap_h:h, 0:w_mid + overlap_w]  # Left Mouth / Chin
+    patch_br = image_np[h_mid - overlap_h:h, w_mid - overlap_w:w]  # Right Mouth / Chin
+    
+    return [patch_tl, patch_tr, patch_bl, patch_br]
 
 if model is not None:
-    # EfficientNet-b4 features[-1] is the last Conv2dNormActivation block
+    # EfficientNet-b0 features[-1] is the last Conv2dNormActivation block
     target_layer = model.features[-1]
     grad_cam = GradCAM(model, target_layer)
 
@@ -158,41 +187,58 @@ def predict_single_image(image: Image.Image):
     image = image.convert("RGB")
     image_np = np.array(image)
     
-    # 1. Pipeline: MediaPipe Face Cropping (with 20% margin)
+    # 1. Pipeline: MediaPipe/OpenCV Face Cropping (with 20% margin)
     cropped_np = crop_to_face(image_np, margin=0.2)
     
-    # 2. Pipeline: OpenCV Histogram Equalization (Lighting standardization)
-    equalized_np = apply_histogram_equalization(cropped_np)
+    # 2. Pipeline: OpenCV Frequency Domain Pre-processing (Laplacian Edge highlighting)
+    freq_np = apply_frequency_domain_preprocessing(cropped_np)
     
-    # 2b. Pipeline: OpenCV Kernel Sharpening (Texture enhancement)
-    sharpened_np = apply_sharpening(equalized_np)
+    # 3. Patch-Based Extraction
+    patches = extract_face_patches(freq_np)
     
-    final_image = Image.fromarray(sharpened_np)
-    input_tensor = transform(final_image).unsqueeze(0).to(device)
-    input_tensor.requires_grad = True # Required for Grad-CAM
+    patch_probs = []
+    cam_masks = []
     
-    cam_mask, probability = grad_cam.generate(input_tensor)
+    for patch in patches:
+        final_image = Image.fromarray(patch)
+        input_tensor = transform(final_image).unsqueeze(0).to(device)
+        input_tensor.requires_grad = True # Required for Grad-CAM
+        
+        cam_mask, probability = grad_cam.generate(input_tensor)
+        patch_probs.append(probability)
+        cam_masks.append(cam_mask)
+        
+    # Aggregate probabilities (Mean across patches)
+    avg_probability = float(np.mean(patch_probs))
+    variance = float(np.var(patch_probs))
     
-    # 3. Decision Threshold (> 0.50 for Deepfake)
-    threshold = 0.50
-    is_fake = probability >= threshold
+    # Base Grad-CAM on the patch with the highest fake probability (typically eyes/mouth area)
+    max_prob_idx = np.argmax(patch_probs)
+    best_cam_mask = cam_masks[max_prob_idx]
+    best_patch = patches[max_prob_idx]
+    
+    # 4. Decision Threshold Logic (> 0.70 Confirmed, 0.40 - 0.70 Suspected)
+    is_fake = avg_probability >= 0.40
+    
+    is_confirmed_deepfake = avg_probability >= 0.70
+    is_suspected = 0.40 <= avg_probability < 0.70
     
     if is_fake:
-         confidence = probability
+         confidence = avg_probability
     else:
-         # Map probability < 0.50 uniformly into Authentic Confidence
-         confidence = 1.0 - probability
-    
-    # 4. Grad-CAM mapped directly to the sharpened frame
-    heatmap_b64 = generate_heatmap_base64(sharpened_np, cam_mask)
+         confidence = 1.0 - avg_probability
+         
+    # Generate heatmap strictly over the highest-risk focal patch
+    heatmap_b64 = generate_heatmap_base64(best_patch, best_cam_mask)
     
     return {
         "is_fake": is_fake,
-        "is_deepfake": is_fake,
+        "is_deepfake": is_confirmed_deepfake,
+        "is_suspected": is_suspected,
         "confidence": confidence,
-        "probability": probability,
+        "probability": avg_probability,
         "heatmap": heatmap_b64,
-        "high_suspicion": 0.50 <= probability < 0.60
+        "variance": variance
     }
 
 def predict(image_bytes: bytes) -> dict:
