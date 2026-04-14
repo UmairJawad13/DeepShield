@@ -48,6 +48,8 @@ export default function DeepShieldDashboard() {
   const [status, setStatus] = useState<string>("idle");
   const [progress, setProgress] = useState(0);
 
+  const [authModal, setAuthModal] = useState<"none" | "login" | "register">("none");
+
   const [result, setResult] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -222,6 +224,13 @@ export default function DeepShieldDashboard() {
             </span>
             SYSTEM: ONLINE
           </span>
+
+          <Button variant="outline" size="sm" onClick={() => setAuthModal("login")} className="hidden md:flex bg-transparent border-white/20 text-white hover:bg-white/10 transition-all">
+            Login
+          </Button>
+          <Button size="sm" onClick={() => setAuthModal("register")} className="hidden md:flex bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 transition-all">
+            Register
+          </Button>
 
           <Sheet>
             <SheetTrigger asChild>
@@ -579,6 +588,64 @@ export default function DeepShieldDashboard() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* Auth Modal Overlay */}
+      <AnimatePresence>
+        {authModal !== "none" && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setAuthModal("none")}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm relative"
+            >
+              <Card className="glass-panel-neon border-primary/50 relative overflow-hidden bg-black/90">
+                {/* Laser line effect */}
+                <div className="absolute top-0 left-0 w-full h-[2px] bg-primary shadow-[0_0_15px_2px_rgba(0,240,255,0.8)] z-20"></div>
+
+                <CardHeader className="text-center pb-2">
+                  <Shield className="w-10 h-10 text-primary mx-auto mb-2" />
+                  <CardTitle className="text-2xl font-bold tracking-tight text-white uppercase">{authModal === "login" ? "System Access" : "Agent Registration"}</CardTitle>
+                  <CardDescription className="text-sm text-gray-400">
+                    {authModal === "login" ? "Enter your credentials to proceed." : "Create an account to access the system."}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4 flex flex-col gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-mono text-primary uppercase">Username</label>
+                    <input type="text" placeholder="Enter username" className="w-full bg-black/50 border border-white/10 rounded p-2 text-white outline-none focus:border-primary/50 font-mono text-sm transition-colors placeholder:text-white/20" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-mono text-primary uppercase">Password</label>
+                    <input type="password" placeholder="••••••••" className="w-full bg-black/50 border border-white/10 rounded p-2 text-white outline-none focus:border-primary/50 font-mono text-sm transition-colors placeholder:text-white/20" />
+                  </div>
+                  <Button className="w-full bg-primary text-black hover:bg-primary/80 font-bold uppercase tracking-widest mt-2" onClick={() => {
+                    // Fake action completion
+                    setAuthModal("none");
+                  }}>
+                    {authModal === "login" ? "Authenticate" : "Register"}
+                  </Button>
+                  <div className="text-center mt-2">
+                    <button className="text-xs text-gray-500 hover:text-white transition-colors" onClick={(e) => {
+                      e.preventDefault();
+                      setAuthModal(authModal === "login" ? "register" : "login");
+                    }}>
+                      {authModal === "login" ? "No account? Register here." : "Already an agent? Login here."}
+                    </button>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
