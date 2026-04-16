@@ -1,17 +1,105 @@
 import os
+import torch
+import torch.nn as nn
+import torchvision.models as models
+from torchvision import transforms
+from PIL import Image
+import io
 import cv2
 import numpy as np
 import base64
-import io
-import hashlib
-from PIL import Image
-
-# Setup Device visually
-architecture_loaded = "EfficientNet-B4 (Presentation Mode)"
-model = "Mocked"  # Bypass the None check
 
 # Force OpenCV Fallback for robustness (Only for Bounding Box)
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+# Setup Device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# 3. Architecture & Weights Synchronization
+model_path = "DeepShield.pth"
+architecture_loaded = "Unknown"
+
+try:
+    model = models.efficientnet_b4()
+    num_ftrs = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(num_ftrs, 1) # Force Binary Output
+    
+    if os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path, map_location='cpu'), strict=True)
+        architecture_loaded = "B4"
+    else:
+        model = models.efficientnet_b4(weights=models.EfficientNet_B4_Weights.DEFAULT)
+        model.classifier[1] = nn.Linear(num_ftrs, 1)
+        architecture_loaded = "B4"
+        
+    model = model.to(device)
+    model.eval()
+    print("[SYSTEM] Strict BGR2RGB and Binary Head applied.")
+except Exception as e:
+    print(f"[SYSTEM] B4 Initialization failed: {e}. Falling back to EfficientNet-B0.")
+    model = models.efficientnet_b0()
+    num_ftrs = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(num_ftrs, 1) # Force Binary Output
+    
+    if os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path, map_location='cpu'), strict=True)
+        architecture_loaded = "B0"
+    else:
+        model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.IMAGENET1K_V1)
+        model.classifier[1] = nn.Linear(num_ftrs, 1)
+        architecture_loaded = "B0"
+        
+    model = model.to(device)
+    model.eval()
+
+# Pure PIL & Torchvision Transform Pipeline
+preprocess = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+
+class GradCAM:
+    def __init__(self, model, target_layer):
+        self.model = model
+        self.target_layer = target_layer
+        self.gradients = None
+        self.activations = None
+        
+        self.target_layer.register_forward_hook(self.save_activation)
+        self.target_layer.register_full_backward_hook(self.save_gradient)
+
+    def save_activation(self, module, input, output):
+        self.activations = output
+
+    def save_gradient(self, module, grad_input, grad_output):
+        self.gradients = grad_output[0]
+
+    def generate(self, input_tensor):
+        self.model.zero_grad()
+        output = self.model(input_tensor)
+        
+        target = output[0, 0] # Binary classification output
+        target.backward(retain_graph=True)
+        
+        gradients = self.gradients.data.cpu().numpy()[0]
+        activations = self.activations.data.cpu().numpy()[0]
+        
+        weights = np.mean(gradients, axis=(1, 2))
+        
+        cam = np.zeros(activations.shape[1:], dtype=np.float32)
+        for i, w in enumerate(weights):
+            cam += w * activations[i]
+            
+        cam = np.maximum(cam, 0)
+        # Cam resize using cv2 is fine, it's just the heatmap
+        cam = cv2.resize(cam, (input_tensor.shape[3], input_tensor.shape[2]))
+        cam = cam - np.min(cam)
+        cam_max = np.max(cam)
+        if cam_max > 0:
+            cam = cam / cam_max
+            
+        return cam, torch.sigmoid(output).item()
 
 def generate_heatmap_base64(pil_image: Image.Image, cam_mask: np.ndarray) -> str:
     image_np = np.array(pil_image)
@@ -30,6 +118,9 @@ def generate_heatmap_base64(pil_image: Image.Image, cam_mask: np.ndarray) -> str
     return f"data:image/jpeg;base64,{img_str}"
 
 def get_face_bbox(image_np: np.ndarray, margin=0.30):
+    """
+    Use OpenCV purely to grab bounding box coords, not to manipulate the actual image stream.
+    """
     h, w, _ = image_np.shape
     gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
     faces = face_cascade.detectMultiScale(gray, 1.1, 4)
@@ -51,53 +142,40 @@ def get_face_bbox(image_np: np.ndarray, margin=0.30):
 
     return (x1, y1, x2, y2)
 
-def generate_mock_heatmap(width, height, seed):
-    # Generates a convincing focal-point heatmap mask (0 to 1) based on a random seed
-    np.random.seed(seed)
-    # Focal point coordinates
-    cx = int(width * np.random.uniform(0.3, 0.7))
-    cy = int(height * np.random.uniform(0.3, 0.7))
-    # Gaussian blob
-    x = np.arange(0, width, 1, float)
-    y = np.arange(0, height, 1, float)
-    x, y = np.meshgrid(x, y)
-    
-    sigma_x = width * np.random.uniform(0.15, 0.3)
-    sigma_y = height * np.random.uniform(0.15, 0.3)
-    
-    heatmap = np.exp(-(((x - cx) ** 2) / (2 * sigma_x ** 2) + ((y - cy) ** 2) / (2 * sigma_y ** 2)))
-    # Add a secondary smaller focal point for realism
-    cx2 = int(width * np.random.uniform(0.2, 0.8))
-    cy2 = int(height * np.random.uniform(0.2, 0.8))
-    heatmap2 = np.exp(-(((x - cx2) ** 2) / (1.5 * sigma_x ** 2) + ((y - cy2) ** 2) / (1.5 * sigma_y ** 2)))
-    
-    heatmap = np.maximum(heatmap, heatmap2 * 0.7)
-    return heatmap
+if model is not None:
+    # Get last conv layer depending on architecture
+    target_layer = model.features[-1]
+    grad_cam = GradCAM(model, target_layer)
 
-def predict_single_image(image: Image.Image, signature: str):
+def predict_single_image(image: Image.Image):
     image = image.convert("RGB")
+    
+    # 1. Grab coordinates using OpenCV Array purely as a map
     image_np = np.array(image)
     (left, top, right, bottom) = get_face_bbox(image_np, margin=0.30)
+
+    # 2. Native PIL Cropping
     cropped_image = image.crop((left, top, right, bottom))
     
-    # Generate deterministic outcome based on image content
-    hash_val = int(hashlib.sha256(signature.encode()).hexdigest(), 16)
+    # 3. Bulletproof PyTorch Pipeline
+    input_tensor = preprocess(cropped_image).unsqueeze(0).to(device)
+    input_tensor.requires_grad = True # Required for Grad-CAM
     
-    # We want a mix of high confidence reals and high confidence fakes
-    is_fake = (hash_val % 2) == 0
+    cam_mask, probability = grad_cam.generate(input_tensor)
     
-    # Generate confidence between 88.0% and 99.8% for a very professional look
-    base_calc = (hash_val % 1000) / 1000.0  # 0.0 to 1.0
-    confidence = 0.88 + (base_calc * 0.118)
-    probability = confidence if is_fake else (1.0 - confidence)
-
-    print(f"[SYSTEM] Architecture Loaded: {architecture_loaded} | Raw Mock Score: {probability:.4f}")
+    print(f"[SYSTEM] Architecture Loaded: {architecture_loaded} | Raw Score: {probability:.4f}")
     
-    # Realistic heatmap crop dimensions
+    threshold = 0.50
+    is_fake = probability >= threshold
+    
+    if is_fake:
+         confidence = probability
+    else:
+         confidence = 1.0 - probability
+         
+    # Grad-CAM mapped directly to PIL crop resized to standard sizes
+    # We pass the natively resized PIL crop so it aligns
     standardized_crop = cropped_image.resize((224, 224))
-    
-    # Mock heatmap generation
-    cam_mask = generate_mock_heatmap(224, 224, seed=(hash_val % 10000))
     heatmap_b64 = generate_heatmap_base64(standardized_crop, cam_mask)
     
     return {
@@ -112,14 +190,9 @@ def predict_single_image(image: Image.Image, signature: str):
 def predict(image_bytes: bytes) -> dict:
     if model is None:
         raise RuntimeError("Model was not loaded correctly.")
-        
+    
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    
-    # Create simple signature from bytes to ensure determinism
-    # Shorten it so we act quickly
-    signature = hashlib.md5(image_bytes[:1000] + image_bytes[-1000:]).hexdigest()
-    
-    res = predict_single_image(image, signature)
+    res = predict_single_image(image)
     return {
         "is_fake": res["is_fake"],
         "confidence": round(res["confidence"] * 100, 2),
